@@ -1,14 +1,10 @@
 import express from 'express';
 import dotenv from 'dotenv';
-import { promises as fs } from 'fs';
-import { RecursiveCharacterTextSplitter } from 'langchain/text_splitter';
 import { ChatOpenAI } from "@langchain/openai";
 import { PromptTemplate } from "@langchain/core/prompts";
 import { RunnableSequence } from "@langchain/core/runnables"
-import { createRetriever } from './utils/retriever.js';
-import { OpenAIEmbeddings } from "@langchain/openai";
-import supabaseClient from './supabaseClient.js';
-import combineDocuments from './utils/combineDocuments.js'
+import { createRetriever, addInitialKnowledgeToSupabase } from './utils/database.js';
+import { combineDocuments, getKnowledge, knowledgeFormat } from './utils/helpers.js';
 
 dotenv.config();
 
@@ -24,65 +20,6 @@ const ANSWER_TEMPLATE = `You are a helpful and enthusiastic support bot who can 
   context: {context}
   question: {question}
   answer:`
-
-/**
- * This function reads a .txt file to get the knowledge
- */
-const getKnowledge = (filePath) => {
-  return fs.readFile(filePath, 'utf-8');
-}
-
-/**
- * This function transforms the knowledge that is passed as string into documents
- * @param {string} filePath the path of the file where knowledge is located
- * @param {string} knowledge string with knowledge to be formatted
- * @returns Document array with formatted knowledge
- */
-const knowledgeFormat = async (filePath, knowledge) => {
-  // Text splitter configuration
-  const splitter = new RecursiveCharacterTextSplitter({
-    chunkSize: 500,
-    separators: ['\n\n', '\n', ' ', '', '##'], // Text is splited respecting the paragraphs and other text separators
-    chunkOverlap: 50 // The text will overlap in different chuncks when needed
-  })
-
-  // This will split the knowledge into smaller chuncks of text
-  const documents = await splitter.createDocuments([knowledge])
-
-  // Add metadata to each document
-  return documents.map((doc, index) => ({
-    ...doc,
-    metadata: {
-        source: filePath,
-        chunk: index + 1,
-        totalChunks: documents.length
-    }
-  }));
-}
-
-/**
- * Creates vectores from knowledge and inserts them into DB
- * @param {*} documents knowledge chuncks formatted as Documents type
- * @returns data from DB insertion
- */
-const addInitialKnowledgeToSupabase = async (documents) => {
-    // Initialize information embeddings and create vectors
-    const embeddings = new OpenAIEmbeddings({ openAIApiKey });
-    const vectors = await embeddings.embedDocuments(documents.map(doc => doc.pageContent));
-
-    // Vector formatting
-    const rows = documents.map((doc, i) => ({
-        content: doc.pageContent,
-        embedding: vectors[i],
-        metadata: doc.metadata,
-    }));
-    
-    // Store the vectores created into Supabase (vectorial DB)
-    const { data, error } = await supabaseClient.from('documents').insert(rows);
-    if (error) throw new Error(`Error inserting: ${error.message}`);
-
-    return data
-}
 
 app.post('/init', async (req, res) => {
     try {
