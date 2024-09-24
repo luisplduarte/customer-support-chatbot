@@ -79,10 +79,7 @@ const addInitialKnowledgeToSupabase = async (documents) => {
     
     // Store the vectores created into Supabase (vectorial DB)
     const { data, error } = await supabaseClient.from('documents').insert(rows);
-
-    if (error) {
-        throw new Error(`Error inserting: ${error.message}`);
-    }
+    if (error) throw new Error(`Error inserting: ${error.message}`);
 
     return data
 }
@@ -104,28 +101,23 @@ app.post('/init', async (req, res) => {
       }
 });
 
-//TODO: add validations
-
 app.post('/chat', async (req, res) => {
     try {
         const { userQuestion } = req.body
+        if(!userQuestion) throw new Error(`Missing user question!`);
         
         // Standalone question prompt holding the string phrasing of the standalone prompt
         const standaloneQuestionPrompt = PromptTemplate.fromTemplate(STANDALONE_TEMPLATE)
+        // Turning user input to standalone question
+        const standaloneQuestion = await standaloneQuestionPrompt.pipe(LLM_MODEL).invoke({ question: userQuestion });
 
         // Answer prompt holding the string phrasing of the response prompt
         const answerPrompt = PromptTemplate.fromTemplate(ANSWER_TEMPLATE)
 
-        // Retrieve top 3 closest vectores/results from DB based on similarity
-        const retrieverChain = RunnableSequence.from([
-            async (prevResult) => await retriever.similaritySearch(prevResult, 3),   // prevResult is the arg that we passed in the invoke function
-            // docs is the output of the previous code (the search result in the retriever)
-            (docs) => combineDocuments(docs)  // Combine documents for final context
-        ])
-
-        //TODO: merge 2 runnable
+        // In this chain we will merge the original user input, standalone question, knowledge from DB and AI response to create the final response
         const chain = RunnableSequence.from([            
-            async (prevRes) => retrieverChain.invoke(prevRes.question.content),
+            async (prevRes) => await retriever.similaritySearch(prevRes.question.content, 3), // Retrieve top 3 closest vectores/results from DB based on similarity
+            (docs) => combineDocuments(docs),  // Combine documents for final context. "docs" is the output of the previous code (the search result in the retriever)
             async (docs) => {
               return {
                 context: docs,  // The context is the documents (knowledge) queried from the DB
@@ -134,9 +126,6 @@ app.post('/chat', async (req, res) => {
             },
             answerPrompt.pipe(LLM_MODEL)  // Merge the answer prompt with the llm model knowledge, the knowledge from DB and original user question
         ])
-
-        // Turning user input to standalone question
-        const standaloneQuestion = await standaloneQuestionPrompt.pipe(LLM_MODEL).invoke({ question: userQuestion });
 
         // Generate final answer
         const response = await chain.invoke({
