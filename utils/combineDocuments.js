@@ -1,4 +1,3 @@
-export function combineDocuments(docs){
-    console.log("docs = docs")
-    return docs.map((doc)=>doc.pageContent).join('\n\n')
+export default function combineDocuments(docs){
+    return docs.flat().map((doc) => doc.pageContent).join('\n\n\n\n')
 }

@@ -1,13 +1,14 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import { promises as fs } from 'fs';
-import { createClient } from '@supabase/supabase-js';
 import { RecursiveCharacterTextSplitter } from 'langchain/text_splitter';
 import { ChatOpenAI } from "@langchain/openai";
 import { PromptTemplate } from "@langchain/core/prompts";
 import { RunnableSequence } from "@langchain/core/runnables"
 import { createRetriever } from './utils/retriever.js';
 import { OpenAIEmbeddings } from "@langchain/openai";
+import supabaseClient from './supabaseClient.js';
+import combineDocuments from './utils/combineDocuments.js'
 
 dotenv.config();
 
@@ -17,6 +18,12 @@ app.use(express.json());
 const openAIApiKey = process.env.OPENAI_API_KEY
 const LLM_MODEL = new ChatOpenAI({ openAIApiKey })
 const retriever = createRetriever();
+
+const STANDALONE_TEMPLATE = 'Given a question, convert it to a standalone question. question: {question} standalone question:'
+const ANSWER_TEMPLATE = `You are a helpful and enthusiastic support bot who can answer a given question about Scrimba based on the context provided. Try to find the answer in the context. If you really don't know the answer, say "I'm sorry, I don't know the answer to that.", and direct the questioner to email help@scrimba.com. Don't try to make up an answer. Always speak as if you were chatting to a friend.
+  context: {context}
+  question: {question}
+  answer:`
 
 /**
  * This function reads a .txt file to get the knowledge
@@ -69,12 +76,9 @@ const addInitialKnowledgeToSupabase = async (documents) => {
         embedding: vectors[i],
         metadata: doc.metadata,
     }));
-
-    //TODO: refactor this createClient
-    const client = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_API_KEY)
     
     // Store the vectores created into Supabase (vectorial DB)
-    const { data, error } = await client.from('documents').insert(rows);
+    const { data, error } = await supabaseClient.from('documents').insert(rows);
 
     if (error) {
         throw new Error(`Error inserting: ${error.message}`);
@@ -100,126 +104,51 @@ app.post('/init', async (req, res) => {
       }
 });
 
+//TODO: add validations
+
 app.post('/chat', async (req, res) => {
     try {
-        //const userQuestion = 'Who is the best football player?'
-        const userQuestion = 'What is Scrimba?'
-        console.log("userQuestion = ", userQuestion)
+        const { userQuestion } = req.body
         
-        // A string holding the phrasing of the prompt
-        const standaloneQuestionTemplate = 'Given a question, convert it to a standalone question. question: {question} standalone question:'
-        const standaloneQuestionPrompt = PromptTemplate.fromTemplate(standaloneQuestionTemplate)
+        // Standalone question prompt holding the string phrasing of the standalone prompt
+        const standaloneQuestionPrompt = PromptTemplate.fromTemplate(STANDALONE_TEMPLATE)
 
-        const answerTemplate = `You are a helpful and enthusiastic support bot who can answer a given question about Scrimba based on the context provided. Try to find the answer in the context. If you really don't know the answer, say "I'm sorry, I don't know the answer to that." And direct the questioner to email help@scrimba.com. Don't try to make up an answer. Always speak as if you were chatting to a friend.
-            context: {context}
-            question: {question}
-            answer:`
-        const answerPrompt = PromptTemplate.fromTemplate(answerTemplate)
+        // Answer prompt holding the string phrasing of the response prompt
+        const answerPrompt = PromptTemplate.fromTemplate(ANSWER_TEMPLATE)
 
-        //TODO: add validations
-
-        // Gets top 3 closest vectores/results from DB
+        // Retrieve top 3 closest vectores/results from DB based on similarity
         const retrieverChain = RunnableSequence.from([
-            async (prevResult) => {
-                //console.log("\n\n standaloneQuestion = ", prevResult)
-                const results = await retriever.similaritySearch(prevResult, 3);
-                //console.log("\n\n results = ", results)
-                return results;
-            },
-            //TODO: change these documents transformations
-            (docs) => docs.flat().map((doc) => doc.pageContent).join('\n\n\n\n')
+            async (prevResult) => await retriever.similaritySearch(prevResult, 3),   // prevResult is the arg that we passed in the invoke function
+            // docs is the output of the previous code (the search result in the retriever)
+            (docs) => combineDocuments(docs)  // Combine documents for final context
         ])
-        //console.log("retrieverChain = ", retrieverChain)
+
+        //TODO: merge 2 runnable
+        const chain = RunnableSequence.from([            
+            async (prevRes) => retrieverChain.invoke(prevRes.question.content),
+            async (docs) => {
+              return {
+                context: docs,  // The context is the documents (knowledge) queried from the DB
+                question: userQuestion  // We pass the original user question again because it could still contain relevant information (user sentiment, question context, etc.)
+              }
+            },
+            answerPrompt.pipe(LLM_MODEL)  // Merge the answer prompt with the llm model knowledge, the knowledge from DB and original user question
+        ])
 
         // Turning user input to standalone question
         const standaloneQuestion = await standaloneQuestionPrompt.pipe(LLM_MODEL).invoke({ question: userQuestion });
 
-        //TODO: merge 2 runnable
-        const chain = RunnableSequence.from([            
-            async (prevRes) => {
-              return retrieverChain.invoke(prevRes.question.content);
-            },
-            async (docs) => {
-              //console.log("docs = ", docs)
-              return {
-                context: docs,
-                question: userQuestion
-              }
-            },
-            answerPrompt.pipe(LLM_MODEL)
-        ])
-
-        //console.log("chain = ", chain)
-
+        // Generate final answer
         const response = await chain.invoke({
             question: standaloneQuestion
         })
-        console.log("\n\n AI response = ", response.content)
 
-        
-        /*
-        Await the response when you INVOKE the chain. 
-        Remember to pass in a question.
-        const response = await standaloneQuestionChain.call({
-            question: 'What are the technical requirements for running Scrimba? I only have a very old laptop which is not that powerful.'
-        })
-
-        const standaloneQuestionChain = standaloneQuestionPrompt
-            .pipe(LLM_MODEL)
-            .pipe(new StringOutputParser())
-            
-        */
-        
-        
-        // Runnable sequence that executes the process of generating a standalone question,
-        // performing a similarity search, and returning the answer
-        /*
-        const chain = RunnableSequence.from([
-            async (input) => {
-                // Step 1: Generate a standalone question
-                const standaloneResult = await standaloneQuestionChain.call({ question: userQuestion });
-                console.log("\n\n-----------------------------\n standaloneResult = ", standaloneResult)
-                const standaloneQuestion = standaloneResult.text.trim();
-                console.log("\n\n-----------------------------\n standaloneQuestion = ", standaloneQuestion)
-        
-                // Step 2: Retrieve context documents based on similarity
-                const retrieverResult = await retriever.similaritySearchWithScore(standaloneQuestion, 1);
-                console.log("\n\n-----------------------------\n retrieverResult = ", retrieverResult)
-        
-                // Step 3: Combine documents for final context
-                const combinedDocs = await combineDocuments(retrieverResult);
-                console.log("\n\n-----------------------------\n combinedDocs = ", combinedDocs)
-        
-                // Step 4: Generate the final answer
-                const answerResult = await answerChain.call({
-                    context: combinedDocs,
-                    question: userQuestion
-                });
-                console.log("\n\n-----------------------------\n Answer Result:", answerResult.text);
-        
-                //return answerResult.text;
-            }
-        ]);
-        */
-        
-        /*
-        //const chain = standaloneQuestionPrompt.pipe(LLM_MODEL).pipe(new StringOutputParser()).pipe(retriever)
-
-        const response = await chain.invoke({
-            question: 'What are the technical requirements for running Scrimba? I only have a very old laptop which is not that powerful.'
-        })
-
-        console.log(response)
-        res.status(200).send(response);
-        */
-
-        res.status(200).send();
+        res.status(200).send(response.content);
     } catch (err) {
         console.log(err)
         res.status(500).send('Internal Server Error');
     }
 });
-
 
 app.listen(3000, () => {
   console.log('Chatbot server running on port 3000');
