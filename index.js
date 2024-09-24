@@ -1,32 +1,13 @@
 import express from 'express';
-import axios from 'axios';
 import dotenv from 'dotenv';
 import { promises as fs } from 'fs';
 import { createClient } from '@supabase/supabase-js';
-
 import { RecursiveCharacterTextSplitter } from 'langchain/text_splitter';
-//import { SupabaseVectorStore } from 'langchain/vectorstores';
-import { OpenAI } from "@langchain/openai";
-
 import { ChatOpenAI } from "@langchain/openai";
 import { PromptTemplate } from "@langchain/core/prompts";
-import { LLMChain } from 'langchain/chains';
-
-import { StringOutputParser } from "@langchain/core/output_parsers";
-//import { StringOutputParser } from 'langchain/schema/output_parser'
-import { ChatPromptTemplate, HumanMessagePromptTemplate } from "@langchain/core/prompts";
-import { HumanMessage } from "@langchain/core/messages";
-
-import { RunnablePassthrough, RunnableSequence } from "@langchain/core/runnables"
-
-import { formatDocumentsAsString } from "langchain/util/document";
-
+import { RunnableSequence } from "@langchain/core/runnables"
 import { retriever } from './utils/retriever.js'
-import { combineDocuments } from './utils/combineDocuments.js'
-
 import { OpenAIEmbeddings } from "@langchain/openai";
-import { OpenAIModerationChain } from "langchain/chains";
-
 
 dotenv.config();
 
@@ -34,12 +15,11 @@ const app = express();
 app.use(express.json());
 
 const openAIApiKey = process.env.OPENAI_API_KEY
-
-const llm = new ChatOpenAI({ openAIApiKey })
+const LLM_MODEL = new ChatOpenAI({ openAIApiKey })
 
 const addInitialKnowledgeToSupabase = async () => {
     // Get knowledge from file
-    const text = await fs.readFile('knowledge.txt', 'utf-8');
+    const text = await fs.readFile('./knowledge.txt', 'utf-8');
         
     // Split knowledge into smaller chuncks of text
     // This will split the knowledge text into smaller chuncks of text
@@ -62,6 +42,7 @@ const addInitialKnowledgeToSupabase = async () => {
     }));
 
     // Initialize information embeddings and create vectors
+    if (!openAIApiKey) throw new Error(`Expected env var OPENAI_API_KEY`);
     const embeddings = new OpenAIEmbeddings({ openAIApiKey });
     const vectors = await embeddings.embedDocuments(documentsWithMetadata.map(doc => doc.pageContent));
 
@@ -71,6 +52,7 @@ const addInitialKnowledgeToSupabase = async () => {
         metadata: doc.metadata,
     }));
 
+    //TODO: refactor this createClient
     const client = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_API_KEY)
     // Store the vectores created into Supabase (vectorial DB)
     const { data, error } = await client.from('documents').insert(rows);
@@ -94,12 +76,13 @@ app.post('/init', async (req, res) => {
 
 app.post('/chat', async (req, res) => {
     try {
-        // Turning user input to standalone question
-
+        //const userQuestion = 'Who is the best football player?'
+        const userQuestion = 'What is Scrimba?'
+        console.log("userQuestion = ", userQuestion)
+        
         // A string holding the phrasing of the prompt
         const standaloneQuestionTemplate = 'Given a question, convert it to a standalone question. question: {question} standalone question:'
         const standaloneQuestionPrompt = PromptTemplate.fromTemplate(standaloneQuestionTemplate)
-        console.log("\n\n-----------------------------\n standaloneQuestionPrompt = ", standaloneQuestionPrompt)
 
         const answerTemplate = `You are a helpful and enthusiastic support bot who can answer a given question about Scrimba based on the context provided. Try to find the answer in the context. If you really don't know the answer, say "I'm sorry, I don't know the answer to that." And direct the questioner to email help@scrimba.com. Don't try to make up an answer. Always speak as if you were chatting to a friend.
             context: {context}
@@ -107,92 +90,48 @@ app.post('/chat', async (req, res) => {
             answer:`
         const answerPrompt = PromptTemplate.fromTemplate(answerTemplate)
 
-        // Configuração da LLMChain que combina o PromptTemplate com o modelo
-        const standaloneQuestionChain = new LLMChain({
-            llm,
-            prompt: standaloneQuestionPrompt,
-        });
-        console.log("standaloneQuestionChain = ", standaloneQuestionChain)
+        //TODO: add validations
 
-        const answerChain = new LLMChain({
-            llm,
-            prompt: answerPrompt
-        });
-        console.log("answerChain = ", answerChain)
-
-        const userQuestion = 'What are the technical requirements for running Scrimba? I only have a very old laptop which is not that powerful.'
-
-
+        // Gets top 3 closest vectores/results from DB
         const retrieverChain = RunnableSequence.from([
             async (prevResult) => {
-                const standaloneQuestion = prevResult.standalone_question;
-                const results = await retriever.similaritySearchWithScore(standaloneQuestion, 1);
+                //const standaloneQuestion = prevResult;
+                console.log("\n\n standaloneQuestion = ", prevResult)
+                const results = await retriever.similaritySearch(prevResult, 3);
+                console.log("\n\n results = ", results)
                 return results;  // Retorna o resultado da busca por similaridade
             },
-            combineDocuments
+            //TODO: change these documents transformations
+            (docs) => docs.flat().map((doc) => doc.pageContent).join('\n\n\n\n')
         ])
-        console.log("retrieverChain = ", retrieverChain)
+        //console.log("retrieverChain = ", retrieverChain)
 
-        const standaloneResult = await standaloneQuestionChain.call({ question: userQuestion });
-        console.log("Standalone Question:", standaloneResult.text);
+        // Turning user input to standalone question
+        const standaloneQuestion = await standaloneQuestionPrompt.pipe(LLM_MODEL).invoke({ question: userQuestion });
 
-        /* TODO: it's this chain that is causing problems 
-        const chain = RunnableSequence.from([
-            {
-                standalone_question: await standaloneQuestionChain.call({ question: userQuestion }),
-                //original_input: new RunnablePassthrough()
+        //TODO: merge 2 runnable
+        const chain = RunnableSequence.from([            
+            async (prevRes) => {
+              return retrieverChain.invoke(prevRes.question.content);
             },
-            {
-                context: retrieverChain,
-                question: ({ original_input }) => original_input.question
+            async (docs) => {
+              //console.log("docs = ", docs)
+              return {
+                context: docs,
+                question: userQuestion
+              }
             },
-            answerChain
+            answerPrompt.pipe(LLM_MODEL)
         ])
 
-        console.log("chain = ", chain)
-        */
+        //console.log("chain = ", chain)
+
+        const response = await chain.invoke({
+            question: standaloneQuestion
+        })
+        console.log("\n\n AI response = ", response.content)
 
         
-
-        const chain = RunnableSequence.from([
-            {
-              question: (i) => i.question,
-              context: async (i) => {
-                const relevantDocs = await retriever.similaritySearchWithScore(i.question);
-                return formatDocumentsAsString(relevantDocs);
-              },
-            },
-            async (input) => {
-              const { question, context } = input;
-        
-              const messages = [
-                {
-                  role: "system",
-                  content: `You’re an HTML generator. You should generate high-quality HTML based on the image you'll receive.
-                  
-                   Here are some examples of previously generated HTML and JS code. Base your work primarily on the styles if you find them similar: ${context}.`,
-                },
-                {
-                  role: "user",
-                  content: [
-                    { type: "text", text: question },
-                  ],
-                },
-              ];
-        
-              const response = await model.invoke(messages);
-        
-              return response;
-            },
-            new StringOutputParser(),
-          ]);
-
-
-
-
-
-
-
         /*
         Await the response when you INVOKE the chain. 
         Remember to pass in a question.
@@ -201,13 +140,11 @@ app.post('/chat', async (req, res) => {
         })
 
         const standaloneQuestionChain = standaloneQuestionPrompt
-            .pipe(llm)
+            .pipe(LLM_MODEL)
             .pipe(new StringOutputParser())
             
-        console.log("standaloneQuestionChain = ", standaloneQuestionChain)
         */
         
-
         
         // Runnable sequence that executes the process of generating a standalone question,
         // performing a similarity search, and returning the answer
@@ -240,16 +177,8 @@ app.post('/chat', async (req, res) => {
         ]);
         */
         
-        const response = await chain.invoke({
-            question: userQuestion
-        })
-
-        console.log(response)
-        res.status(200).send(response);
-        
-        
         /*
-        //const chain = standaloneQuestionPrompt.pipe(llm).pipe(new StringOutputParser()).pipe(retriever)
+        //const chain = standaloneQuestionPrompt.pipe(LLM_MODEL).pipe(new StringOutputParser()).pipe(retriever)
 
         const response = await chain.invoke({
             question: 'What are the technical requirements for running Scrimba? I only have a very old laptop which is not that powerful.'
@@ -265,6 +194,7 @@ app.post('/chat', async (req, res) => {
         res.status(500).send('Internal Server Error');
     }
 });
+
 
 app.listen(3000, () => {
   console.log('Chatbot server running on port 3000');

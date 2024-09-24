@@ -5,18 +5,14 @@ import { createClient } from '@supabase/supabase-js'
 
 dotenv.config();
 
-const openAIApiKey = process.env.OPENAI_API_KEY
+const OPEN_AI_API_KEY = process.env.OPENAI_API_KEY
+const EMBEDDINGS = new OpenAIEmbeddings({ OPEN_AI_API_KEY })
+const CLIENT = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_API_KEY)
 
-const embeddings = new OpenAIEmbeddings({ openAIApiKey })
-
-const client = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_API_KEY)
-
-const retriever = await SupabaseVectorStore.fromExistingIndex(client, embeddings, {
-    //client,
+const retriever = await SupabaseVectorStore.fromExistingIndex(EMBEDDINGS, {
+    CLIENT,
     tableName: 'documents',
     queryName: 'match_documents'
 })
-
-//const retriever = vectorStore.similaritySearch()
 
 export { retriever }
