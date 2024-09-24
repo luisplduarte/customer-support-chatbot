@@ -6,7 +6,7 @@ import { RecursiveCharacterTextSplitter } from 'langchain/text_splitter';
 import { ChatOpenAI } from "@langchain/openai";
 import { PromptTemplate } from "@langchain/core/prompts";
 import { RunnableSequence } from "@langchain/core/runnables"
-import { retriever } from './utils/retriever.js'
+import { createRetriever } from './utils/retriever.js';
 import { OpenAIEmbeddings } from "@langchain/openai";
 
 dotenv.config();
@@ -16,6 +16,7 @@ app.use(express.json());
 
 const openAIApiKey = process.env.OPENAI_API_KEY
 const LLM_MODEL = new ChatOpenAI({ openAIApiKey })
+const retriever = createRetriever();
 
 const addInitialKnowledgeToSupabase = async () => {
     // Get knowledge from file
@@ -95,11 +96,10 @@ app.post('/chat', async (req, res) => {
         // Gets top 3 closest vectores/results from DB
         const retrieverChain = RunnableSequence.from([
             async (prevResult) => {
-                //const standaloneQuestion = prevResult;
-                console.log("\n\n standaloneQuestion = ", prevResult)
+                //console.log("\n\n standaloneQuestion = ", prevResult)
                 const results = await retriever.similaritySearch(prevResult, 3);
-                console.log("\n\n results = ", results)
-                return results;  // Retorna o resultado da busca por similaridade
+                //console.log("\n\n results = ", results)
+                return results;
             },
             //TODO: change these documents transformations
             (docs) => docs.flat().map((doc) => doc.pageContent).join('\n\n\n\n')

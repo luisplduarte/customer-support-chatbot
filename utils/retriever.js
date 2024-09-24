@@ -5,14 +5,23 @@ import { createClient } from '@supabase/supabase-js'
 
 dotenv.config();
 
-const OPEN_AI_API_KEY = process.env.OPENAI_API_KEY
-const EMBEDDINGS = new OpenAIEmbeddings({ OPEN_AI_API_KEY })
-const CLIENT = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_API_KEY)
+/**
+ * Function that creates and returns vector database connection
+ * @returns database retriever
+ */
+export const createRetriever = () => {
+  // Init Supabase client
+  const client = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_API_KEY);
 
-const retriever = await SupabaseVectorStore.fromExistingIndex(EMBEDDINGS, {
-    CLIENT,
+  // Init embeddings model
+  const embeddings = new OpenAIEmbeddings({
+    openAIApiKey: process.env.OPENAI_API_KEY,
+  });
+
+  // Creates and returns Supabase integration object
+  return new SupabaseVectorStore(embeddings, {
+    client,
     tableName: 'documents',
-    queryName: 'match_documents'
-})
-
-export { retriever }
+    queryName: 'match_documents',
+  });
+};
