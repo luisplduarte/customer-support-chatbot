@@ -18,36 +18,53 @@ const openAIApiKey = process.env.OPENAI_API_KEY
 const LLM_MODEL = new ChatOpenAI({ openAIApiKey })
 const retriever = createRetriever();
 
-const addInitialKnowledgeToSupabase = async () => {
-    // Get knowledge from file
-    const text = await fs.readFile('./knowledge.txt', 'utf-8');
-        
-    // Split knowledge into smaller chuncks of text
-    // This will split the knowledge text into smaller chuncks of text
-    const splitter = new RecursiveCharacterTextSplitter({
-        chunkSize: 500,
-        separators: ['\n\n', '\n', ' ', '', '##'], // Default setting to the text is splited respecting the paragraphs and other text separators
-        chunkOverlap: 50 //The text will overlap in different chuncks when needed
-    })
+/**
+ * This function reads a .txt file to get the knowledge
+ */
+const getKnowledge = (filePath) => {
+  return fs.readFile(filePath, 'utf-8');
+}
 
-    const documents = await splitter.createDocuments([text])
+/**
+ * This function transforms the knowledge that is passed as string into documents
+ * @param {string} filePath the path of the file where knowledge is located
+ * @param {string} knowledge string with knowledge to be formatted
+ * @returns Document array with formatted knowledge
+ */
+const knowledgeFormat = async (filePath, knowledge) => {
+  // Text splitter configuration
+  const splitter = new RecursiveCharacterTextSplitter({
+    chunkSize: 500,
+    separators: ['\n\n', '\n', ' ', '', '##'], // Text is splited respecting the paragraphs and other text separators
+    chunkOverlap: 50 // The text will overlap in different chuncks when needed
+  })
 
-    // Add metadata to each document
-    const documentsWithMetadata = documents.map((doc, index) => ({
-        ...doc,
-        metadata: {
-            source: 'knowledge.txt',
-            chunk: index + 1,
-            totalChunks: documents.length
-        }
-    }));
+  // This will split the knowledge into smaller chuncks of text
+  const documents = await splitter.createDocuments([knowledge])
 
+  // Add metadata to each document
+  return documents.map((doc, index) => ({
+    ...doc,
+    metadata: {
+        source: filePath,
+        chunk: index + 1,
+        totalChunks: documents.length
+    }
+  }));
+}
+
+/**
+ * Creates vectores from knowledge and inserts them into DB
+ * @param {*} documents knowledge chuncks formatted as Documents type
+ * @returns data from DB insertion
+ */
+const addInitialKnowledgeToSupabase = async (documents) => {
     // Initialize information embeddings and create vectors
-    if (!openAIApiKey) throw new Error(`Expected env var OPENAI_API_KEY`);
     const embeddings = new OpenAIEmbeddings({ openAIApiKey });
-    const vectors = await embeddings.embedDocuments(documentsWithMetadata.map(doc => doc.pageContent));
+    const vectors = await embeddings.embedDocuments(documents.map(doc => doc.pageContent));
 
-    const rows = documentsWithMetadata.map((doc, i) => ({
+    // Vector formatting
+    const rows = documents.map((doc, i) => ({
         content: doc.pageContent,
         embedding: vectors[i],
         metadata: doc.metadata,
@@ -55,20 +72,28 @@ const addInitialKnowledgeToSupabase = async () => {
 
     //TODO: refactor this createClient
     const client = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_API_KEY)
+    
     // Store the vectores created into Supabase (vectorial DB)
     const { data, error } = await client.from('documents').insert(rows);
 
     if (error) {
         throw new Error(`Error inserting: ${error.message}`);
     }
+
+    return data
 }
 
 app.post('/init', async (req, res) => {
     try {
-        addInitialKnowledgeToSupabase()
+        if (!openAIApiKey) throw new Error(`Expected env var OPENAI_API_KEY`);
+
+        //TODO: get knowledge path from request ???
+        const knowledge = await getKnowledge('./knowledge.txt')
+        const documentsWithMetadata = await knowledgeFormat('./knowledge.txt', knowledge)
+
+        addInitialKnowledgeToSupabase(documentsWithMetadata)
 
         res.status(200).send('Documents added to Supabase');
-
       } catch (err) {
         console.log(err)
         res.status(500).send('Internal Server Error');
