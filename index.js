@@ -33,19 +33,17 @@ app.post('/init', async (req, res) => {
       }
 });
 
-const conversationHitory = [];
-
-//TODO: find a way to not use the history array
 app.post('/chat', async (req, res) => {
     try {
-        const { userQuestion } = req.body
+        const { userQuestion, history } = req.body
         if(!userQuestion) throw new Error(`Missing user question!`);
+        if(!history) throw new Error(`Missing history!`);
 
         //TODO: simplify the code by creating more functions
 
         // Append current user question to history
-        conversationHitory.push({ role: 'user', content: userQuestion }); // History structure -> [{ role: "user", content: "message" }, { role: "bot", content: "response" }, ...]
-        const formattedConversationHistory = conversationHitory.map(h => `${h.role}: ${h.content}`).join('\n');
+        history.push({ role: 'user', content: userQuestion }); // History structure -> [{ role: "user", content: "message" }, { role: "bot", content: "response" }, ...]
+        const formattedConversationHistory = history.map(h => `${h.role}: ${h.content}`).join('\n');
         
         // Standalone question prompt holding the string phrasing of the standalone prompt
         const standaloneQuestionPrompt = PromptTemplate.fromTemplate(STANDALONE_TEMPLATE);
@@ -80,9 +78,9 @@ app.post('/chat', async (req, res) => {
         });
 
         // Append AI response to history
-        conversationHitory.push({ role: 'bot', content: response.content });
+        history.push({ role: 'bot', content: response.content });
 
-        res.status(200).send({ response: response.content, history: conversationHitory });
+        res.status(200).send({ response: response.content, history: history });
     } catch (err) {
         console.log(err);
         res.status(500).send('Internal Server Error');
