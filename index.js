@@ -14,7 +14,7 @@ app.use(express.json());
 const openAIApiKey = process.env.OPENAI_API_KEY
 const LLM_MODEL = new ChatOpenAI({ 
   openAIApiKey, 
-  temperature: 0 // Set temperature to 0 cecause this is a chatbot and we don't want him to be creative in the response
+  temperature: 0 // Set temperature to 0 because this is a chatbot and we don't want him to be creative in the response
 })
 const retriever = createRetriever();
 
