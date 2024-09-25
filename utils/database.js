@@ -27,7 +27,7 @@ export const createRetriever = () => {
 
 /**
  * Creates vectores from knowledge and inserts them into DB
- * @param {*} documents knowledge chuncks formatted as Documents type
+ * @param {array} documents knowledge chunks formatted as Documents type
  * @returns data from DB insertion
  */
 export const addInitialKnowledgeToSupabase = async (documents) => {
