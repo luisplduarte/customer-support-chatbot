@@ -12,7 +12,10 @@ const app = express();
 app.use(express.json());
 
 const openAIApiKey = process.env.OPENAI_API_KEY
-const LLM_MODEL = new ChatOpenAI({ openAIApiKey })
+const LLM_MODEL = new ChatOpenAI({ 
+  openAIApiKey, 
+  temperature: 0 // Set temperature to 0 cecause this is a chatbot and we don't want him to be creative in the response
+})
 const retriever = createRetriever();
 
 // This standalone template will tell AI to convert user question to standalone question (simplifies the text) as well as 
