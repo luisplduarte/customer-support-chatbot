@@ -5,6 +5,7 @@ import { PromptTemplate } from "@langchain/core/prompts";
 import { RunnableSequence } from "@langchain/core/runnables"
 import { createRetriever, addInitialKnowledgeToSupabase } from './utils/database.js';
 import { combineDocuments, getKnowledge, knowledgeFormat } from './utils/helpers.js';
+import { STANDALONE_TEMPLATE, ANSWER_TEMPLATE } from './utils/constants.js';
 
 dotenv.config();
 
@@ -12,34 +13,16 @@ const app = express();
 app.use(express.json());
 
 const openAIApiKey = process.env.OPENAI_API_KEY
-const LLM_MODEL = new ChatOpenAI({ 
-  openAIApiKey, 
-  temperature: 0 // Set temperature to 0 because this is a chatbot and we don't want him to be creative in the response
-})
+const LLM_MODEL = new ChatOpenAI({ openAIApiKey })
 const retriever = createRetriever();
-
-// This standalone template will tell AI to convert user question to standalone question (simplifies the text) as well as 
-//give the conversation history context to the prompt
-const STANDALONE_TEMPLATE = `Given some conversation history (if any) and a question, convert the question to a standalone question. 
-  conversation history: {conversation_history}
-  question: {question} 
-  standalone question: `
-
-// This answer template will tell AI how to respont to user question. We give the context (knowledge), conversation history
-//as well as the user question to the prompt so it has more information to create the response
-const ANSWER_TEMPLATE = `You are a helpful and enthusiastic support bot who can answer a given question about Scrimba based on the context provided and the conversation history provided. Try to find the answer in the context. If the answer is not given in the context, find the answer in the conversation history if possible and reply using you own words. If you really don't know the answer, say "I'm sorry, I don't know the answer to that." And direct the questioner to email help@scrimba.com. Don't try to make up an answer. Always speak as if you were chatting to a friend.
-  context: {context}
-  conversation history: {conversation_history}
-  question: {question}
-  answer: `
 
 app.post('/init', async (req, res) => {
     try {
         if (!openAIApiKey) throw new Error(`Expected env var OPENAI_API_KEY`);
 
-        //TODO: get knowledge path from request ???
-        const knowledge = await getKnowledge('./knowledge.txt')
-        const documentsWithMetadata = await knowledgeFormat('./knowledge.txt', knowledge)
+        const file_path = `${import.meta.dirname}/knowledge.txt`
+        const knowledge = await getKnowledge(file_path)
+        const documentsWithMetadata = await knowledgeFormat(file_path, knowledge)
 
         addInitialKnowledgeToSupabase(documentsWithMetadata)
 
@@ -52,10 +35,13 @@ app.post('/init', async (req, res) => {
 
 const conversationHitory = [];
 
+//TODO: find a way to not use the history array
 app.post('/chat', async (req, res) => {
     try {
         const { userQuestion } = req.body
         if(!userQuestion) throw new Error(`Missing user question!`);
+
+        //TODO: simplify the code by creating more functions
 
         // Append current user question to history
         conversationHitory.push({ role: 'user', content: userQuestion }); // History structure -> [{ role: "user", content: "message" }, { role: "bot", content: "response" }, ...]
