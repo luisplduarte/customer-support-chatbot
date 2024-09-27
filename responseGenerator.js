@@ -1,15 +1,11 @@
 import { PromptTemplate } from "@langchain/core/prompts";
 import { RunnableSequence } from "@langchain/core/runnables"
-import { ChatOpenAI } from "@langchain/openai";
 import { combineDocuments } from './utils/helpers.js';
 import { STANDALONE_TEMPLATE, ANSWER_TEMPLATE } from './utils/constants.js';
 import { createRetriever } from './utils/database.js';
+import { getModel } from "./utils/aiModels.js";
 
-const openAIApiKey = process.env.OPENAI_API_KEY
-const LLM_MODEL = new ChatOpenAI({ 
-    model: "gpt-4o-mini", 
-    openAIApiKey 
-})
+const LLM_MODEL = await getModel();
 const retriever = await createRetriever();
 
 /**
