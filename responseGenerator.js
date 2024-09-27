@@ -6,7 +6,10 @@ import { STANDALONE_TEMPLATE, ANSWER_TEMPLATE } from './utils/constants.js';
 import { createRetriever } from './utils/database.js';
 
 const openAIApiKey = process.env.OPENAI_API_KEY
-const LLM_MODEL = new ChatOpenAI({ openAIApiKey })
+const LLM_MODEL = new ChatOpenAI({ 
+    model: "gpt-4o-mini", 
+    openAIApiKey 
+})
 const retriever = await createRetriever();
 
 /**
