@@ -7,7 +7,7 @@ import { createRetriever } from './utils/database.js';
 
 const openAIApiKey = process.env.OPENAI_API_KEY
 const LLM_MODEL = new ChatOpenAI({ openAIApiKey })
-const retriever = createRetriever();
+const retriever = await createRetriever();
 
 /**
  * This function receives user question and chat history and returns the response created by the AI model.
@@ -51,5 +51,5 @@ export const generateResponse = async (userQuestion, history) => {
         question: standaloneQuestion
     });
 
-    return response.content
+    return response.content;
 }
