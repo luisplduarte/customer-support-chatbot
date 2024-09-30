@@ -11,7 +11,9 @@ export const combineDocuments = (docs) => {
 }
 
 /**
- * This function reads a .txt file to get the knowledge
+ * This function reads a .txt file to get the knowledge.
+ * @param {*} filePath File's path.
+ * @returns String with the file content.
  */
 export const getKnowledge = (filePath) => {
     return fs.readFile(filePath, 'utf-8');

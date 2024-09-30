@@ -1,6 +1,6 @@
 import express from 'express';
 import dotenv from 'dotenv';
-import { addInitialKnowledgeToSupabase } from './utils/database.js';
+import { addInitialKnowledgeToVectorStore } from './utils/database.js';
 import { getKnowledge, knowledgeFormat } from './utils/helpers.js';
 import { generateResponse } from './responseGenerator.js';
 
@@ -17,7 +17,7 @@ app.post('/init', async (req, res) => {
         const knowledge = await getKnowledge(file_path)
         const documentsWithMetadata = await knowledgeFormat(file_path, knowledge)
 
-        addInitialKnowledgeToSupabase(documentsWithMetadata)
+        addInitialKnowledgeToVectorStore(documentsWithMetadata)
 
         res.status(200).send('Documents added to Supabase');
       } catch (err) {
