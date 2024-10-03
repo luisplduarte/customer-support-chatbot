@@ -1,5 +1,8 @@
 import express from 'express';
+import session from 'express-session';
 import dotenv from 'dotenv';
+import { createClient as createRedisClient } from 'redis';
+import RedisStore from "connect-redis"
 import { addInitialKnowledgeToVectorStore } from './utils/database.js';
 import { getKnowledge, knowledgeFormat } from './utils/helpers.js';
 import { generateResponse } from './responseGenerator.js';
@@ -8,6 +11,25 @@ dotenv.config();
 
 const app = express();
 app.use(express.json());
+
+const redisClient = createRedisClient();
+await redisClient.connect().catch(console.error);
+
+// Redis connection store configuration
+const redisStore = new RedisStore({
+  client: redisClient
+});
+
+// Redis sessions configuration
+app.use(
+  session({
+    store: redisStore,
+    secret: process.env.SESSION_SECRET || 'mySecret',
+    resave: false,
+    saveUninitialized: false,
+    cookie: { maxAge: 1000 * 60 * 60 }, // 1 hour
+  })
+);
 
 app.post('/init', async (req, res) => {
     try {
@@ -28,15 +50,21 @@ app.post('/init', async (req, res) => {
 
 app.post('/chat', async (req, res) => {
     try {
-        const { userQuestion, history } = req.body
+        const { userQuestion } = req.body
         if(!userQuestion) throw new Error(`Missing user question!`);
-        if(!history) throw new Error(`Missing history!`);
 
+        const history = req.session.history || [];
         history.push({ role: 'user', content: userQuestion }); // Append current user question to history
-        const ai_response = await generateResponse(userQuestion, history)
-        history.push({ role: 'bot', content: ai_response });  // Append AI response to history
 
-        res.status(200).send({ response: ai_response, history: history });
+        const ai_response = await generateResponse(userQuestion, history)
+
+        history.push({ role: 'bot', content: ai_response });  // Append AI response to history
+        req.session.history = history;
+
+        res.status(200).send({ 
+          response: ai_response, 
+          history: history
+        });
     } catch (err) {
         console.log(err);
         res.status(500).send('Internal Server Error');
